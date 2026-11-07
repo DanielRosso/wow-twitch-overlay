@@ -2,6 +2,8 @@
 
 Dein Twitch-Chat im Stil von World of Warcraft: als WoW-Chatfenster, mit Erfolgen, einem Gruppenfenster aus deinen Zuschauern und passenden Start- und Pausenbildschirmen. Für Streamlabs und OBS, ohne Login und ohne Server.
 
+[![Auf Ko-fi unterstützen](https://img.shields.io/badge/Ko--fi-unterst%C3%BCtzen-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/blubbmon)
+
 <p align="center">
   <img src="docs/images/hero.png" alt="Beispielszene mit Schlachtzugswarnung, Gruppenfenster, Chat und Erfolgs-Popup" width="900">
   <br><sub>Beispielszene. Der Hintergrund ist ein Platzhalter, im Stream liegt dort dein Spiel.</sub>
@@ -142,6 +144,10 @@ Damit der Countdown beim Einblenden neu beginnt, schaltest du in der Quelle des 
 ## Testen ohne Chat
 
 Zu den Live-Overlays gibt es Testversionen mit Beispielnachrichten: `index-test.html`, `erfolg-test.html`, `gruppe-test.html` und `raidwarnung-test.html`. Wähle sie zum Platzieren als **Lokale Datei** aus und stelle danach wieder auf die normale Datei um. Im Test-Gruppenfenster ist man schon nach 1 Minute tot, damit du alle Zustände schnell siehst.
+
+## Unterstützen
+
+Die Overlays sind kostenlos. Wenn sie dir gefallen, kannst du mir auf [Ko-fi](https://ko-fi.com/blubbmon) einen Kaffee spendieren oder auf [Twitch](https://twitch.tv/blubbmon) vorbeischauen.
 
 ## Dateien
 
