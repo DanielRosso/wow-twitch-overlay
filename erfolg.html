@@ -1,0 +1,105 @@
+<!doctype html>
+<!--
+  WoW-Erfolge für Twitch-Ereignisse (Regeln in twitch.js, achievementOf).
+  Eigene Browserquelle in Streamlabs, Grösse z. B. 480 x 130.
+  ?demo=1 zeigt alle 7 Sekunden ein Beispiel.
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>WoW Erfolg</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:transparent}
+body{display:grid;place-items:center;font-family:Georgia,serif;text-shadow:1px 1px 0 #000}
+.toast{
+  width:440px;height:96px;box-sizing:border-box;display:flex;align-items:center;gap:14px;padding:0 14px;
+  background:radial-gradient(ellipse at 50% 0%,#4a4436,#1b1813 70%);
+  border:3px solid #b08d48;border-radius:14px;
+  box-shadow:inset 0 0 0 2px #3a2f1a,inset 0 0 18px #000,0 4px 14px #000a;
+  animation:in .5s ease-out,out .8s ease-in 5.5s forwards;
+}
+.icon{width:62px;height:62px;flex:none;box-sizing:border-box;border-radius:50%;border:3px solid #b08d48;
+  background:radial-gradient(#3a5a7a,#10202e);display:grid;place-items:center;box-shadow:inset 0 0 8px #000}
+.icon svg{width:60%;fill:#ffd100}
+.txt{flex:1;min-width:0;text-align:center}
+.head{font-size:13px;color:#ffd100;letter-spacing:.05em}
+.name{font-size:22px;color:#fff;margin:2px 0}
+.who{font:22px "Arial Narrow","Roboto Condensed",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shield{width:46px;flex:none}
+@keyframes in{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:none}}
+@keyframes out{to{opacity:0}}
+</style>
+</head>
+<body>
+<template id="tpl">
+  <div class="toast">
+    <div class="icon"><svg viewBox="0 0 24 24"><path fill-rule="evenodd"/></svg></div>
+    <div class="txt">
+      <div class="head">Erfolg errungen</div>
+      <div class="name"></div>
+      <div class="who"></div>
+    </div>
+    <svg class="shield" viewBox="0 0 46 54">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d8b464"/><stop offset="1" stop-color="#6b4f1e"/></linearGradient></defs>
+      <path d="M23 1 45 8v20c0 14-10 21-22 25C11 49 1 42 1 28V8z" fill="url(#g)" stroke="#3a2f1a" stroke-width="2"/>
+      <text x="23" y="34" text-anchor="middle" font-family="Georgia,serif" font-size="18" font-weight="bold" fill="#fff" stroke="#000" stroke-width=".6"></text>
+    </svg>
+  </div>
+</template>
+<script src="config.js"></script>
+<script src="twitch.js"></script>
+<script>
+const ICONS = {
+  chat:  'M12 4C6.5 4 3 7 3 10.5c0 2.2 1.4 4 3.6 5.1L5.5 20l4.6-3.1c.6.1 1.2.1 1.9.1 5.5 0 9-3 9-6.5S17.5 4 12 4z',
+  star:  'M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4-6.5 4 2-7.5L2 9h7z',
+  sword: 'M21 3l-1 5-8.5 8.5 2 2-1.5 1.5-2-2-3.5 3.5-2-2 3.5-3.5-2-2L7.5 10.5l2 2L18 4z',
+  coin:  'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10z',
+  gift:  'M3 9h18v4H3zM4 13h16v8H4zM11 9h2v12h-2zM12 9C9 9 6 8 7 5.5S11 6 12 9c1-3 4-6 5-3.5S15 9 12 9z',
+  crown: 'M3 18h18l-2-11-5 4-2-7-2 7-5-4z',
+};
+const queue = [];
+let busy = false;
+
+function show(a) {
+  queue.push(a);
+  if (!busy) next();
+}
+
+function next() {
+  const a = queue.shift();
+  busy = !!a;
+  if (!a) return;
+  const el = document.getElementById('tpl').content.firstElementChild.cloneNode(true);
+  el.querySelector('.icon path').setAttribute('d', ICONS[a.icon]);
+  el.querySelector('.name').textContent = a.title;
+  el.querySelector('text').textContent = a.points;
+  const who = el.querySelector('.who');
+  who.textContent = a.name;
+  who.style.color = classColor(a.name);
+  document.body.append(el);
+  setTimeout(() => { el.remove(); next(); }, 6400);
+}
+
+if (DEMO) {
+  const samples = [
+    { name: 'Thrall', title: 'Erste Worte', points: 10, icon: 'chat' },
+    { name: 'Jaina', title: 'Treuer Abonnent', points: 10, icon: 'star' },
+    { name: 'Anduin', title: 'Gruppe gesucht', points: 25, icon: 'sword' },
+    { name: 'Sylvanas', title: 'Goldesel', points: 25, icon: 'coin' },
+    { name: 'Varian', title: 'Spendierfreudig', points: 10, icon: 'gift' },
+    { name: 'Illidan', title: 'Gesprächig', points: 10, icon: 'chat' },
+    { name: 'Tyrande', title: 'Stammgast', points: 25, icon: 'crown' },
+  ];
+  let i = 0;
+  const demo = () => show(samples[i++ % samples.length]);
+  demo();
+  setInterval(demo, 7000);
+} else {
+  connectTwitch(CHANNEL, m => {
+    const a = achievementOf(m);
+    if (a) show(a);
+  });
+}
+</script>
+</body>
+</html>

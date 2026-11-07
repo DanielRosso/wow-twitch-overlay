@@ -1,0 +1,163 @@
+<!doctype html>
+<!--
+  WoW-Gruppenfenster: du + die zuletzt aktiven Chatter.
+  Bis 5 Personen als Gruppe, darüber als Schlachtzug (config.js: raid).
+  Leben sinkt, je länger jemand nichts schreibt; nach `dead` Minuten "Tot", neue Nachricht heilt.
+  Wer doppelt so lange still ist, verlässt die Gruppe.
+  Eigene Browserquelle in Streamlabs, Grösse z. B. 440 x 260.
+  Per URL überschreibbar: channel, dead (Minuten), raid, demo=1
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>WoW Gruppe</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:transparent}
+body{padding:4px;box-sizing:border-box;font-family:"Arial Narrow","Roboto Condensed",sans-serif;text-shadow:1px 1px 0 #000}
+.pf{position:relative;width:230px;margin-bottom:8px;border:2px solid #000;outline:1px solid #5e5238;background:#141414}
+.pf.dead{opacity:.75}
+.hp{height:36px;position:relative;background:#262626}
+.bar{position:absolute;inset:0 auto 0 0}
+.role{position:absolute;left:4px;top:4px;width:16px;height:16px}
+.nm{position:absolute;left:24px;right:44px;top:3px;color:#fff;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc{position:absolute;right:6px;top:4px;color:#fff;font-size:13px}
+.st{position:absolute;left:24px;right:52px;bottom:2px;color:#ddd;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dead .nm,.dead .pc,.dead .st{color:#999}
+.mp{height:4px;background:#0070dd}
+.dead .mp{background:#333}
+.buffs{position:absolute;right:4px;bottom:3px;display:flex;gap:2px}
+.buff{width:13px;height:13px;box-sizing:border-box;border:1px solid #000;outline:1px solid #7a6a45;background:#1a1a1a;display:grid;place-items:center}
+.buff svg{width:11px;height:11px}
+.pop{position:absolute;right:50px;top:-4px;z-index:1;color:#3f3;font-size:20px;font-weight:bold;animation:rise 1.5s ease-out forwards}
+.pop.rez{color:#ffd100}
+@keyframes rise{from{transform:translateY(10px);opacity:1}to{transform:translateY(-18px);opacity:0}}
+/* Schlachtzugsansicht: Spalten zu je 5 kleinen Rahmen */
+.raid #party{display:grid;grid-template-rows:repeat(5,auto);grid-auto-flow:column;justify-content:start;gap:5px 6px}
+.raid .pf{width:100px;margin:0}
+.raid .hp{height:28px}
+.raid .nm{left:18px;right:4px;top:6px;font-size:13px}
+.raid .role{left:3px;top:7px;width:12px;height:12px}
+.raid .pc,.raid .st,.raid .buffs{display:none}
+.raid .pop{right:4px;font-size:15px}
+</style>
+</head>
+<body>
+<div id="party"></div>
+<script src="config.js"></script>
+<script src="twitch.js"></script>
+<script>
+const DEAD_MS = (params.has('dead') ? +params.get('dead') : DEMO ? 1 : CONFIG.dead ?? 10) * 60000;
+const MAX = Math.max(5, params.has('raid') ? +params.get('raid') : CONFIG.raid ?? 20); // inkl. Streamer
+const ICON = {
+  broadcaster: ['#ffd100', 'M3 18h18l-2-11-5 4-2-7-2 7-5-4z'],
+  moderator:   ['#9fc3ff', 'M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z'],
+  vip:         ['#7dff7d', 'M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7z'],
+  viewer:      ['#ffb0b0', 'M21 3l-1 5-8.5 8.5 2 2-1.5 1.5-2-2-3.5 3.5-2-2 3.5-3.5-2-2L7.5 10.5l2 2L18 4z'],
+};
+const BUFF = {
+  sub:   ['#ffd100', 'M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4-6.5 4 2-7.5L2 9h7z'],
+  first: ['#7fd8ff', 'M12 4C6.5 4 3 7 3 10.5c0 2.2 1.4 4 3.6 5.1L5.5 20l4.6-3.1c.6.1 1.2.1 1.9.1 5.5 0 9-3 9-6.5S17.5 4 12 4z'],
+  gold:  ['#ffb000', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z'],
+};
+const LABEL = { broadcaster: 'Schlachtzugsleiter', moderator: 'Mod', vip: 'VIP', viewer: '' };
+
+const leader = { name: CHANNEL, role: 'broadcaster', last: Date.now() };
+let slots = []; // Chatter: { name, uid, role, sub, first, gold, last, pop }
+
+const hpOf = (m, now) => m === leader ? 1 : Math.max(0, 1 - (now - m.last) / DEAD_MS);
+
+function hit(o) {
+  if (o.role === 'broadcaster') { leader.name = o.name; return render(); }
+  const m = slots.find(s => s.name.toLowerCase() === o.name.toLowerCase());
+  if (m) {
+    // Heilzahl wie Kampftext in WoW
+    const before = hpOf(m, o.last);
+    Object.assign(m, o, { first: m.first || o.first, gold: m.gold || o.gold });
+    if (before === 0) m.pop = { text: 'Wiederbelebt', rez: true, at: o.last };
+    else if (before <= .99) m.pop = { text: `+${Math.round((1 - before) * 100)}%`, at: o.last };
+  } else if (slots.length < MAX - 1) slots.push(o);
+  else {
+    const oldest = slots.reduce((a, b) => (a.last < b.last ? a : b));
+    slots[slots.indexOf(oldest)] = o;
+  }
+  render();
+}
+
+function svg(cls, [color, path]) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24');
+  if (cls) s.setAttribute('class', cls);
+  s.style.fill = color;
+  s.innerHTML = `<path d="${path}"/>`;
+  return s;
+}
+
+function frame(m, now) {
+  const idle = m === leader ? 0 : now - m.last;
+  const hp = hpOf(m, now);
+  const dead = hp === 0;
+  const min = Math.floor(idle / 60000);
+  const status = dead ? 'schreib was zum Wiederbeleben' : min >= 2 ? `seit ${min} Min. still` : LABEL[m.role] || (m.sub ? 'Abo' : '');
+
+  const el = document.createElement('div');
+  el.className = 'pf' + (dead ? ' dead' : '');
+  el.innerHTML = `<div class="hp"><div class="bar"></div><span class="nm"></span><span class="pc"></span>
+    <span class="st"></span><span class="buffs"></span></div><div class="mp"></div>`;
+  el.querySelector('.bar').style.cssText = `width:${hp * 100}%;background:${classColor(m.name)}`;
+  el.querySelector('.hp').append(svg('role', dead ? ['#999', ICON[m.role][1]] : ICON[m.role]));
+  el.querySelector('.nm').textContent = m.name;
+  el.querySelector('.pc').textContent = dead ? 'Tot' : Math.round(hp * 100) + '%';
+  el.querySelector('.st').textContent = status;
+  if (m.role === 'moderator' && !dead) el.querySelector('.mp').style.background = '#c41e3a';
+  if (!dead) for (const k of ['sub', 'first', 'gold']) {
+    if (!m[k]) continue;
+    const b = document.createElement('span');
+    b.className = 'buff';
+    b.append(svg('', BUFF[k]));
+    el.querySelector('.buffs').append(b);
+  }
+  if (m.pop && now - m.pop.at < 1500) {
+    const pop = document.createElement('span');
+    pop.className = 'pop' + (m.pop.rez ? ' rez' : '');
+    pop.textContent = m.pop.text;
+    pop.style.animationDelay = `${m.pop.at - now}ms`; // läuft nach einem Neuzeichnen weiter
+    el.append(pop);
+  }
+  return el;
+}
+
+function render() {
+  const now = Date.now();
+  slots = slots.filter(m => now - m.last < 2 * DEAD_MS); // lange Tote verlassen die Gruppe
+  document.body.classList.toggle('raid', slots.length + 1 > 5);
+  document.getElementById('party').replaceChildren(frame(leader, now), ...slots.map(m => frame(m, now)));
+}
+
+setInterval(render, 5000);
+render();
+
+if (DEMO) {
+  const users = [['Thrall', 'viewer'], ['Jaina', 'moderator'], ['Anduin', 'vip'], ['Sylvanas', 'viewer'],
+                 ['Varian', 'viewer'], ['Illidan', 'viewer'], ['Tyrande', 'vip'], ['Malfurion', 'viewer']];
+  const demo = () => {
+    const [name, role] = users[Math.floor(Math.random() * users.length)];
+    hit({ name, role, sub: Math.random() < .3, first: Math.random() < .2, gold: Math.random() < .1, last: Date.now() });
+  };
+  demo(); demo(); demo();
+  setInterval(demo, 8000);
+} else {
+  connectTwitch(CHANNEL, m => {
+    const t = m.tags;
+    if (m.cmd === 'PRIVMSG' && !BOTS.test(t['display-name'] || '')) {
+      hit({ name: t['display-name'], uid: t['user-id'], role: roleOf(t), sub: /subscriber|founder/.test(t.badges || ''),
+            first: t['first-msg'] === '1', gold: !!t.bits, last: Date.now() });
+    } else if (m.cmd === 'CLEARCHAT' && t['target-user-id']) {
+      slots = slots.filter(s => s.uid !== t['target-user-id']);
+      render();
+    }
+  });
+}
+</script>
+</body>
+</html>

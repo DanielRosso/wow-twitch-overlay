@@ -1,0 +1,238 @@
+<!doctype html>
+<!--
+  WoW-Chat-Overlay für Twitch (Streamlabs/OBS-Browserquelle).
+  Einstellungen in config.js. Einzelne Werte per URL überschreibbar,
+  z. B. index.html?demo=1&size=18 (channel, size, bg, fade, lines, time=0, demo=1)
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>WoW Chat Overlay</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed&display=swap" rel="stylesheet">
+<style>
+:root{
+  --size:22px; --bg:rgba(0,0,0,1);
+  --say:#fff; --whisper:#ff80ff; --guild:#40ff40; --party:#aaaaff; --leader:#ff4809; --emote:#ff8040; --system:#ffff00;
+}
+html,body{margin:0;height:100%;overflow:hidden;background:transparent}
+#frame{position:absolute;inset:0;display:flex;flex-direction:column;font-size:var(--size);text-shadow:1px 1px 0 #000}
+.tabs{display:flex;gap:.2em;padding-left:2.2em}
+.tab{padding:.2em .8em .1em;font:.75em Georgia,serif;color:#8f8565;
+  background:linear-gradient(#3b3428,#1c1914);border:2px solid #5e5238;border-bottom:0;border-radius:.6em .6em 0 0}
+.tab.on{color:#ffd100;border-color:#9c8550}
+.box{flex:1;min-height:0;display:flex;background:var(--bg)}
+.side{display:flex;flex-direction:column;justify-content:space-between;padding:.25em}
+.btn{width:1.4em;height:1.4em;box-sizing:border-box;border:2px solid #9c8550;border-radius:.3em;
+  background:radial-gradient(#3a3a3a,#0a0a0a);display:grid;place-items:center}
+.btn svg{width:75%;height:75%;fill:#ffd100}
+#chat{flex:1;min-width:0;overflow:hidden;padding:4px 6px 4px 2px;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  font:1em/1.25 "Arial Narrow","Roboto Condensed",sans-serif}
+.m{margin:0;overflow-wrap:anywhere;transition:opacity 3s}
+.m.out{opacity:0}
+.e{height:1.5em;vertical-align:middle;margin:-.25em 0}
+</style>
+</head>
+<body>
+<div id="frame">
+  <div class="tabs"><span class="tab on">Allgemein</span><span class="tab">Kampflog</span></div>
+  <div class="box">
+    <div class="side">
+      <span class="btn"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9z"/><path d="M15 8.5a4.5 4.5 0 0 1 0 7M17.5 6a8 8 0 0 1 0 12" fill="none" stroke="#ffd100" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 4C6.5 4 3 7 3 10.5c0 2.2 1.4 4 3.6 5.1L5.5 20l4.6-3.1c.6.1 1.2.1 1.9.1 5.5 0 9-3 9-6.5S17.5 4 12 4z"/></svg></span>
+    </div>
+    <div id="chat"></div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="twitch.js"></script>
+<script src="emotes.js"></script>
+<script>
+const p =new URLSearchParams(location.search);
+const num = (k, d) => p.has(k) ? +p.get(k) : d;
+const C = {
+  channel: CHANNEL,
+  size: num('size', CONFIG.size), bg: num('bg', CONFIG.bg), fade: num('fade', CONFIG.fade),
+  lines: num('lines', CONFIG.lines), time: p.has('time') ? p.get('time') !== '0' : CONFIG.time, demo: DEMO,
+};
+const root = document.documentElement.style;
+root.setProperty('--size', C.size + 'px');
+root.setProperty('--bg', `rgba(0,0,0,${C.bg})`);
+const chat = document.getElementById('chat');
+
+// Twitch-Rolle -> WoW-Chatkanal
+const ROLES = {
+  broadcaster: { label: 'Schlachtzugsleiter', color: 'var(--leader)' },
+  moderator:   { label: 'Gilde',  color: 'var(--guild)' },
+  vip:         { label: 'Gruppe', color: 'var(--party)' },
+  viewer:      { label: '',       color: 'var(--say)' },
+};
+
+const txt = (el, s) => el.append(document.createTextNode(s));
+const hhmm = () => new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+
+// hide: Bereiche [von, bis], die nicht angezeigt werden (z. B. Cheer100)
+function body(el, text, emotes, hide = []) {
+  const ch = Array.from(text), marks = hide.map(([a, b]) => [a, b, null]);
+  for (const e of (emotes || '').split('/')) {
+    if (!e) continue;
+    const [id, pos] = e.split(':');
+    for (const r of pos.split(',')) { const [a, b] = r.split('-').map(Number); marks.push([a, b, id]); }
+  }
+  marks.sort((x, y) => x[0] - y[0]);
+  let i = 0;
+  for (const [a, b, id] of marks) {
+    if (a > i) words(el, ch.slice(i, a).join(''));
+    if (id) {
+      const img = new Image();
+      img.className = 'e';
+      img.alt = ch.slice(a, b + 1).join('');
+      img.src = `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/2.0`;
+      el.append(img);
+    }
+    i = b + 1;
+  }
+  if (i < ch.length) words(el, ch.slice(i).join(''));
+}
+
+// Text ausgeben, Wörter mit 7TV-, BTTV- oder FFZ-Emote als Bild
+function words(el, s) {
+  if (!EXTRA_EMOTES.size) return txt(el, s);
+  for (const part of s.split(/(\s+)/)) {
+    const url = EXTRA_EMOTES.get(part);
+    if (url) {
+      const img = new Image();
+      img.className = 'e';
+      img.alt = part;
+      img.src = url;
+      el.append(img);
+    } else if (part) txt(el, part);
+  }
+}
+
+function push(el) {
+  chat.append(el);
+  while (chat.children.length > C.lines) chat.firstChild.remove();
+  if (C.fade > 0) setTimeout(() => el.classList.add('out'), C.fade * 1000);
+}
+
+function line(color) {
+  const el = document.createElement('p');
+  el.className = 'm';
+  el.style.color = color;
+  if (C.time) txt(el, `[${hhmm()}] `);
+  return el;
+}
+
+function system(text) {
+  const el = line('var(--system)');
+  txt(el, text);
+  push(el);
+}
+
+function add(o) {
+  const r = o.whisper ? { label: '', color: 'var(--whisper)' } : ROLES[o.role] || ROLES.viewer;
+  const el = line(o.action ? 'var(--emote)' : r.color);
+  el.dataset.id = o.id || '';
+  el.dataset.uid = o.uid || '';
+  if (r.label && !o.action) txt(el, `[${r.label}] `);
+  if (o.sub) txt(el, '<Abo>');
+  const n = document.createElement('span');
+  n.style.color = classColor(o.name);
+  n.textContent = o.action ? o.name : `[${o.name}]`;
+  el.append(n);
+  txt(el, o.action ? ' ' : r.label ? ': ' : o.whisper ? ' flüstert: ' : ' sagt: ');
+  body(el, o.text, o.emotes, o.hide);
+  push(el);
+}
+
+// Gelbe Zeile, die mit einem Namen in Klassenfarbe beginnt
+function named(name, rest) {
+  const el = line('var(--system)');
+  const n = document.createElement('span');
+  n.style.color = classColor(name);
+  n.textContent = `[${name}]`;
+  el.append(n);
+  txt(el, rest);
+  push(el);
+}
+const achievement = (name, title) => named(name, ` hat den Erfolg [${title}] errungen!`);
+
+// Cheer-Wörter wie "Cheer100" als Bereiche (in Zeichen) finden
+function cheerRanges(text) {
+  const r = [];
+  let i = 0;
+  for (const w of text.split(' ')) {
+    const n = Array.from(w).length;
+    if (/^[a-z]+\d+$/i.test(w)) r.push([i, i + n]); // samt folgendem Leerzeichen
+    i += n + 1;
+  }
+  return r;
+}
+
+function onLine(m, ws) {
+  const t = m.tags;
+  switch (m.cmd) {
+    case 'ROOMSTATE':
+      if (!ws.joined) {
+        ws.joined = true;
+        system(`Ihr seid dem Kanal beigetreten: [Twitch: ${C.channel}]`);
+        loadExtraEmotes(t['room-id']);
+      }
+      break;
+    case 'PRIVMSG': {
+      const badges = t.badges || '';
+      const role = roleOf(t);
+      let text = m.text, action = false;
+      const a = text.match(/^\x01ACTION (.*)\x01$/);
+      if (a) { text = a[1]; action = true; }
+      const name = t['display-name'] || 'Unbekannt';
+      let hide = [];
+      if (t.bits) {
+        named(name, ` hat ${t.bits} Gold gespendet.`);
+        hide = cheerRanges(text);
+      }
+      const ach = achievementOf(m);
+      if (ach) achievement(ach.name, ach.title);
+      const rest = Array.from(text).filter((_, i) => !hide.some(([a, b]) => i >= a && i <= b)).join('');
+      // Erwähnung des Streamers erscheint wie ein WoW-Flüstern
+      const whisper = role !== 'broadcaster' && new RegExp(`@${C.channel}\\b`, 'i').test(text);
+      if (rest.trim()) add({ id: t.id, uid: t['user-id'], name, role, whisper,
+            sub: /subscriber|founder/.test(badges), action, text, emotes: t.emotes, hide });
+      break;
+    }
+    case 'USERNOTICE': {
+      // Einzelmeldungen eines Sammelgeschenks überspringen, die Sammelmeldung reicht
+      if (t['msg-id'] === 'subgift' && t['msg-param-community-gift-id']) break;
+      system(t['system-msg'] + (m.text ? ' ' + m.text : ''));
+      const ach = achievementOf(m);
+      if (ach) achievement(ach.name, ach.title);
+      break;
+    }
+    case 'CLEARMSG': chat.querySelector(`[data-id="${CSS.escape(t['target-msg-id'] || '')}"]`)?.remove(); break;
+    case 'CLEARCHAT':
+      if (t['target-user-id']) chat.querySelectorAll(`[data-uid="${CSS.escape(t['target-user-id'])}"]`).forEach(e => e.remove());
+      else chat.replaceChildren();
+      break;
+  }
+}
+
+if (C.demo) {
+  const users = [['Thrall', 'viewer'], ['Jaina', 'moderator'], ['Anduin', 'vip'], [CHANNEL, 'broadcaster'], ['Sylvanas', 'viewer'], ['Varian', 'viewer']];
+  const texts = ['hi chat Kappa', 'wann kommt der nächste key?', 'lol gg', 'heal pls', 'ich hab grad loot bekommen', 'Kappa Kappa Kappa', 'welche Klasse spielst du?'];
+  const tick = () => {
+    const [name, role] = users[Math.floor(Math.random() * users.length)];
+    const text = texts[Math.floor(Math.random() * texts.length)];
+    const emotes = [...text.matchAll(/Kappa/g)].map(x => `${x.index}-${x.index + 4}`).join(',');
+    add({ name, role, sub: Math.random() < .3, action: Math.random() < .1, text, emotes: emotes && '25:' + emotes });
+  };
+  system(`Ihr seid dem Kanal beigetreten: [Twitch: ${C.channel}] (Demo)`);
+  setTimeout(() => achievement('Thrall', 'Erste Worte'), 3000);
+  setTimeout(() => onLine(parseIrc('@badges=;bits=100;display-name=Jaina;emotes=;id=d1;mod=1;user-id=7 :j!j@j PRIVMSG #x :Cheer100 starker Pull!'), {}), 6000);
+  setInterval(tick, 1500);
+} else {
+  connectTwitch(C.channel, onLine);
+}
+</script>
+</body>
+</html>
